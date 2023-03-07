@@ -1,6 +1,7 @@
 #include <iostream>
 #include <getopt.h>
 #include <filesystem>
+#include "ThreadPool/ThreadPool.h"
 
 namespace fs = std::filesystem;
 
@@ -85,4 +86,6 @@ int main(int argc, char **argv)
     std::cout << "Name of result file: " << result_file_param << std::endl;
     std::cout << "Number of threads: " << num_threads_param << std::endl;
     std::cout << "Pattern word: " << pattern << std::endl;
+
+    ThreadPool pool(4);
 }

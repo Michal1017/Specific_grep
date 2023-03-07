@@ -6,6 +6,12 @@ enable_testing()
 
 add_executable(Specific_grep main.cpp)
 
+add_subdirectory(ThreadPool)
+
+target_link_directories(${PROJECT_NAME} PUBLIC ThreadPool/)
+
+target_link_libraries (Specific_grep LINK_PUBLIC ThreadPool)
+
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
