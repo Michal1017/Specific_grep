@@ -30,8 +30,8 @@ auto get_arguments(int argc, char **argv)
 
     // default values of optional arguments
     std::string dir_param = fs::current_path().generic_string();
-    std::string log_file_param = "Specific_grep.log";
-    std::string result_file_param = "Specific_grep.txt";
+    std::string log_file_param = "Specific_grep";
+    std::string result_file_param = "Specific_grep";
     int num_threads_param = 4;
     std::string pattern = "";
 
@@ -74,6 +74,33 @@ auto get_arguments(int argc, char **argv)
 bool compare_vectors(std::vector<std::string> &v1, std::vector<std::string> &v2)
 {
     return v1.size() > v2.size();
+}
+
+// function which write results in result file
+void write_to_result_file(std::vector<std::vector<std::string>> &results, std::string &result_file_name)
+{
+    // add .txt to result file name
+    result_file_name = result_file_name + ".txt";
+    // open file
+    std::ofstream result_file(result_file_name, std::ios::out);
+    // check if file is open
+    if (!result_file)
+    {
+        // information if file is not open
+        std::cerr << "Failed to open file!" << std::endl;
+    }
+    else
+    {
+        // write data to file
+        for (const auto &result : results)
+        {
+            for (const auto &line : result)
+            {
+                result_file << line << std::endl;
+            }
+        }
+        result_file.close();
+    }
 }
 
 // function which find pattern words in files
@@ -127,13 +154,15 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
     // sort results vector by size of lines found in each file
     std::sort(results.begin(), results.end(), compare_vectors);
 
-    for (auto &r1 : results)
-    {
-        for (auto &r2 : r1)
-        {
-            std::cout << r2 << std::endl;
-        }
-    }
+    write_to_result_file(results, result_file_name);
+
+    // for (auto &r1 : results)
+    // {
+    //     for (auto &r2 : r1)
+    //     {
+    //         std::cout << r2 << std::endl;
+    //     }
+    // }
 }
 
 int main(int argc, char **argv)
