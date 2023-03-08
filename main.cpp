@@ -4,6 +4,7 @@
 #include <fstream>
 #include <memory>
 #include <algorithm>
+#include <chrono>
 #include "ThreadPool/ThreadPool.h"
 
 namespace fs = std::filesystem;
@@ -16,6 +17,17 @@ static struct option long_options[] =
         {"result_file", required_argument, 0, 'r'},
         {"threads", required_argument, 0, 't'},
         {0, 0, 0, 0}};
+
+struct Terminal_output_info
+{
+    int num_searched_files = 0;
+    int num_files_with_pattern = 0;
+    int num_found_patterns = 0;
+    std::string result_path = "";
+    std::string log_path = "";
+    int num_threads = 0;
+    double elapsed_time = 0;
+};
 
 // function which return given by user arguments
 auto get_arguments(int argc, char **argv)
@@ -80,9 +92,9 @@ bool compare_vectors(std::vector<std::string> &v1, std::vector<std::string> &v2)
 void write_to_result_file(std::vector<std::vector<std::string>> &results, std::string &result_file_name)
 {
     // add .txt to result file name
-    result_file_name = result_file_name + ".txt";
+    std::string result_file_name_ = result_file_name + ".txt";
     // open file
-    std::ofstream result_file(result_file_name, std::ios::out);
+    std::ofstream result_file(result_file_name_, std::ios::out);
     // check if file is open
     if (!result_file)
     {
@@ -104,10 +116,11 @@ void write_to_result_file(std::vector<std::vector<std::string>> &results, std::s
 }
 
 // function which find pattern words in files
-void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, std::vector<std::future<void>> &futures, std::string &result_file_name)
+void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, std::vector<std::future<void>> &futures, std::string &result_file_name, std::shared_ptr<Terminal_output_info> &info_ptr)
 {
     std::vector<std::vector<std::string>> results;
     std::shared_ptr<std::vector<std::string>> results_ptr = std::make_shared<std::vector<std::string>>();
+
     // search for files in folders
     for (const auto &entry : fs::recursive_directory_iterator(dir))
     {
@@ -116,12 +129,17 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
         {
             std::vector<std::string> result;
             // create task for threat pool which looking for pattern word in file
-            auto future = pool.submit([&entry, &word, &result, results_ptr]()
+            auto future = pool.submit([&entry, &word, &result, results_ptr, &info_ptr]()
                                       { 
                                         // open file to read
                                         std::ifstream file(entry.path());
                                         if (file.good())
                                         {
+                                            // increase number of searched files
+                                            info_ptr->num_searched_files++;
+                                            // flag which inform us if any pattern was found in file
+                                            bool pattern_found = false;
+
                                             int line_number = 0;
                                             std::string line;
                                             // read file line by line
@@ -137,6 +155,13 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
                                                     // add line to vectors of results
                                                     result.push_back(result_line);
                                                     results_ptr->push_back(result_line);
+                                                    // increase number of found patterns in all files
+                                                    info_ptr->num_found_patterns++;
+                                                    //increase number of found files with pattern
+                                                    if(!pattern_found){
+                                                        pattern_found = true;
+                                                        info_ptr->num_files_with_pattern++;
+                                                    }
                                                 }
                                             }
                                         } });
@@ -155,22 +180,28 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
     std::sort(results.begin(), results.end(), compare_vectors);
 
     write_to_result_file(results, result_file_name);
+}
 
-    // for (auto &r1 : results)
-    // {
-    //     for (auto &r2 : r1)
-    //     {
-    //         std::cout << r2 << std::endl;
-    //     }
-    // }
+// function which print information on console
+void print_terminal_info(std::shared_ptr<Terminal_output_info> &info_ptr)
+{
+    std::cout << "Searched files: " << info_ptr->num_searched_files << std::endl;
+    std::cout << "Files with pattern: " << info_ptr->num_files_with_pattern << std::endl;
+    std::cout << "Patterns number: " << info_ptr->num_found_patterns << std::endl;
+    std::cout << "Result file: " << info_ptr->result_path << std::endl;
+    std::cout << "Log file: " << info_ptr->log_path << std::endl;
+    std::cout << "Used threads: " << info_ptr->num_threads << std::endl;
+    std::cout << "Elapsed time: " << info_ptr->elapsed_time << " s" << std::endl;
 }
 
 int main(int argc, char **argv)
 {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     // get arguments
     auto [dir_param_str, log_file_param, result_file_param, num_threads_param, pattern] = get_arguments(argc, argv);
 
-    // convert
+    // convert string dictonary paremeter to fs::path type
     fs::path dir_param;
     if (std::filesystem::exists(dir_param_str))
     {
@@ -178,12 +209,11 @@ int main(int argc, char **argv)
     }
     else
     {
+        // if given path is wrong then print information and end program
         std::cerr << "Wrong filepath!" << std::endl;
         std::cerr << "Example filepath: C:\\Users\\Public" << std::endl;
         return 1;
     }
-
-    std::cout << dir_param_str << std::endl;
 
     // check if there is argument with pattern word which is required
     if (pattern.size() == 0)
@@ -194,13 +224,28 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    std::cout << "Directory: " << dir_param << std::endl;
-    std::cout << "Log file name: " << log_file_param << std::endl;
-    std::cout << "Name of result file: " << result_file_param << std::endl;
-    std::cout << "Number of threads: " << num_threads_param << std::endl;
-    std::cout << "Pattern word: " << pattern << std::endl;
+    // create shared pointer to Terminal_output_info object
+    std::shared_ptr<Terminal_output_info> info_ptr = std::make_shared<Terminal_output_info>();
 
+    // create thread pool
     ThreadPool pool(num_threads_param);
     std::vector<std::future<void>> futures;
-    find_word(dir_param, pattern, pool, futures, result_file_param);
+
+    // looking for a pattern word
+    find_word(dir_param, pattern, pool, futures, result_file_param, info_ptr);
+
+    // give information to info_ptr
+    info_ptr->result_path = fs::current_path().generic_string() + "\\" + result_file_param + ".txt";
+    info_ptr->log_path = fs::current_path().generic_string() + "\\" + log_file_param + ".log";
+    info_ptr->num_threads = num_threads_param;
+
+    // calculate time elapsed from beginning to the end of the program
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    info_ptr->elapsed_time = std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
+
+    // print information on console
+    print_terminal_info(info_ptr);
+
+    return 0;
 }
