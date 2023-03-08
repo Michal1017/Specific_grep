@@ -43,30 +43,3 @@ ThreadPool::~ThreadPool()
         thread.join();
     }
 }
-
-// because of we don't know what task we receive, we declarate tamplate declaration
-template <class F, class... Args>
-auto ThreadPool::submit(F &&f, Args &&...args) -> std::future<decltype(f(args...))>
-{
-    // deduce a return type of f function, which will be our task
-    using return_type = decltype(f(args...));
-    // create shared pointer to a object which store a f function and arguments
-    auto task = std::make_shared<std::packaged_task<return_type()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-    // future object is created to hold the raturn value of f function
-    std::future<return_type> result = task->get_future();
-    {
-        std::unique_lock<std::mutex> lock(mutex_);
-        // if thread pool is stopped throw exception
-        if (stop_)
-        {
-            throw std::runtime_error("submit on stopped ThreadPool");
-        }
-        // add new task to a tasks_ queue
-        tasks_.emplace([task]()
-                       { (*task)(); });
-    }
-    // notify a one thread because new task has been added
-    condition_.notify_one();
-    // return a future object which store return value of a f function
-    return result;
-}

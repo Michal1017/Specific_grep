@@ -1,6 +1,9 @@
 #include <iostream>
 #include <getopt.h>
 #include <filesystem>
+#include <fstream>
+#include <memory>
+#include <algorithm>
 #include "ThreadPool/ThreadPool.h"
 
 namespace fs = std::filesystem;
@@ -67,10 +70,91 @@ auto get_arguments(int argc, char **argv)
     return return_values{dir_param, log_file_param, result_file_param, num_threads_param, pattern};
 }
 
+// function which help to compare sizes of vectors of strings
+bool compare_vectors(std::vector<std::string> &v1, std::vector<std::string> &v2)
+{
+    return v1.size() > v2.size();
+}
+
+// function which find pattern words in files
+void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, std::vector<std::future<void>> &futures, std::string &result_file_name)
+{
+    std::vector<std::vector<std::string>> results;
+    std::shared_ptr<std::vector<std::string>> results_ptr = std::make_shared<std::vector<std::string>>();
+    // search for files in folders
+    for (const auto &entry : fs::recursive_directory_iterator(dir))
+    {
+        // check if file is ok
+        if (fs::is_regular_file(entry) && fs::file_size(entry) > 0)
+        {
+            std::vector<std::string> result;
+            // create task for threat pool which looking for pattern word in file
+            auto future = pool.submit([&entry, &word, &result, results_ptr]()
+                                      { 
+                                        // open file to read
+                                        std::ifstream file(entry.path());
+                                        if (file.good())
+                                        {
+                                            int line_number = 0;
+                                            std::string line;
+                                            // read file line by line
+                                            while (std::getline(file, line))
+                                            {
+                                                // increase line number
+                                                line_number++;  
+                                                // check if line in file has pattern word
+                                                if (line.find(word) != std::string::npos)
+                                                {
+                                                    // create line to write into result file
+                                                    std::string result_line = entry.path().generic_string() + ':' + std::to_string(line_number) + ": " + line;
+                                                    // add line to vectors of results
+                                                    result.push_back(result_line);
+                                                    results_ptr->push_back(result_line);
+                                                }
+                                            }
+                                        } });
+            futures.push_back(std::move(future));
+            // wait until all threads finish their work
+            for (auto &future : futures)
+            {
+                future.wait();
+            }
+            // add vector of lines found inside one file to vector of all found matching lines
+            results.emplace_back(result);
+        }
+    }
+
+    // sort results vector by size of lines found in each file
+    std::sort(results.begin(), results.end(), compare_vectors);
+
+    for (auto &r1 : results)
+    {
+        for (auto &r2 : r1)
+        {
+            std::cout << r2 << std::endl;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
+    // get arguments
+    auto [dir_param_str, log_file_param, result_file_param, num_threads_param, pattern] = get_arguments(argc, argv);
 
-    auto [dir_param, log_file_param, result_file_param, num_threads_param, pattern] = get_arguments(argc, argv);
+    // convert
+    fs::path dir_param;
+    if (std::filesystem::exists(dir_param_str))
+    {
+        dir_param = dir_param_str;
+    }
+    else
+    {
+        std::cerr << "Wrong filepath!" << std::endl;
+        std::cerr << "Example filepath: C:\\Users\\Public" << std::endl;
+        return 1;
+    }
+
+    std::cout << dir_param_str << std::endl;
 
     // check if there is argument with pattern word which is required
     if (pattern.size() == 0)
@@ -87,5 +171,7 @@ int main(int argc, char **argv)
     std::cout << "Number of threads: " << num_threads_param << std::endl;
     std::cout << "Pattern word: " << pattern << std::endl;
 
-    ThreadPool pool(4);
+    ThreadPool pool(num_threads_param);
+    std::vector<std::future<void>> futures;
+    find_word(dir_param, pattern, pool, futures, result_file_param);
 }
