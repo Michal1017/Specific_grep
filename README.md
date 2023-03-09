@@ -1,13 +1,13 @@
 # Specific_grep
 
 Program in C++ which behaves quite like grep -r. Program will be looking for pattern word in start directory (default is current directory) and subfolders,
-which we give as parameter when we run a program. As an output program print information about
-searching on console. Also program produce 2 files.
+which we give as parameter when we run a program. As an output program prints information about
+searching on console. Also program produces 2 files.
 
 First file is the log file. This file contains thread ids and file names it's processed,
 sorted from the thread id with the most files number and ending with the least.
 
-Second file is the result file. In this file we have information file paths where pattern word was found,
+Second file is the result file. In this file we have information about file paths where pattern word was found,
 number of line in file where pattern was found and line content.
 
 ## How to install
