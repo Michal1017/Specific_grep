@@ -12,8 +12,6 @@ number of line in file where pattern was found and line content.
 
 ## How to install
 
-### Linux
-
 1. Make sure you have minimum 3.0.0 version of cmake.
 2. Clone repository in destination folder using command:
 ```
