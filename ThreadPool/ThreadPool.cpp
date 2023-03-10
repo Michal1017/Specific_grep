@@ -4,8 +4,8 @@ ThreadPool::ThreadPool(size_t num_threads)
 {
     for (size_t i = 0; i < num_threads; ++i)
     {
-        // add new thread to thread_ vector where lambda function, which implement behavior of new thread,
-        // is passed as argument to emplace_back function
+        // add new thread to thread_ vector where lambda function, which implement
+        // behavior of new thread, is passed as argument to emplace_back function
         threads_.emplace_back([this]
                               {
                 while (true) {
@@ -32,7 +32,8 @@ ThreadPool::~ThreadPool()
 {
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        // set a stop_ flag to true so inform working threads to exit infinite loop which is in contructor
+        // set a stop_ flag to true so inform working threads to exit infinite loop
+        // which is in contructor
         stop_ = true;
     }
     // wake up all threads so they will check stop_ flag

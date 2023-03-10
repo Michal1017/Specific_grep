@@ -5,10 +5,9 @@
 #include <queue>
 #include <future>
 #include <functional>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
 
+// class which represent thread pool, as input gets number of threads in thread pool,
+// class is needed to provide managment of working threads
 class ThreadPool
 {
 public:
@@ -23,7 +22,8 @@ public:
         // deduce a return type of f function, which will be our task
         using return_type = decltype(f(args...));
         // create shared pointer to a object which store a f function and arguments
-        auto task = std::make_shared<std::packaged_task<return_type()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        auto task = std::make_shared<std::packaged_task<return_type()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
         // future object is created to hold the raturn value of f function
         std::future<return_type> result = task->get_future();
         {
@@ -50,7 +50,8 @@ private:
     std::queue<std::function<void()>> tasks_;
     // mutex which help to make sure if specific thread has exlusive access to tasks_
     std::mutex mutex_;
-    // condition variable which allow the worker threads to wait until there are available tasks in task queue
+    // condition variable which allow the worker threads to wait until there are
+    // available tasks in task queue
     std::condition_variable condition_;
     // bool variable which inform us if working of thread pool is stoped
     bool stop_ = false;

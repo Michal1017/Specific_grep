@@ -31,7 +31,8 @@ struct Terminal_output_info
     double elapsed_time = 0;
 };
 
-// function which return given by user arguments
+// function which return given by user arguments,
+// this function has declaration together with definition because return type is auto
 auto get_arguments(int argc, char **argv)
 {
     // structure of values which will be return by function
@@ -81,12 +82,91 @@ auto get_arguments(int argc, char **argv)
         pattern = argv[optind];
     }
 
-    return return_values{dir_param, log_file_param, result_file_param, num_threads_param, pattern};
+    return return_values{dir_param, log_file_param, result_file_param,
+                         num_threads_param, pattern};
 }
 
 // function which write results in result file
-void write_to_result_file(std::vector<std::vector<std::string>> &results, std::string &result_file_name)
+void write_to_result_file(std::vector<std::vector<std::string>> &results,
+                          std::string &result_file_name);
+
+// function which write logs to log file
+void write_to_log_file(std::shared_ptr<std::map<std::thread::id,
+                                                std::vector<std::string>>> &LogMapPtr,
+                       std::string &log_file_name);
+
+// function which is looking for pattern word inside file, it is task for threads
+void find_pattern_word(const std::filesystem::directory_entry &entry, const std::string &word,
+                       std::shared_ptr<std::vector<std::string>> results_ptr,
+                       std::shared_ptr<Terminal_output_info> &info_ptr,
+                       std::shared_ptr<std::map<
+                           std::thread::id, std::vector<std::string>>>
+                           &LogMapPtr);
+
+// function which is looking for files which can search
+void find_files(const fs::path &dir, const std::string &word, ThreadPool &pool,
+                std::vector<std::future<void>> &futures, std::string &result_file_name,
+                std::shared_ptr<Terminal_output_info> &info_ptr, std::string &log_file_name);
+
+// function which print information on console
+void print_terminal_info(std::shared_ptr<Terminal_output_info> &info_ptr);
+
+// function which is looking for any error in given parameters
+bool find_errors(std::string &dir_param_str, std::filesystem::path &dir_param,
+                 int &num_threads_param, std::string &pattern);
+
+int main(int argc, char **argv)
 {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    // get arguments
+    auto [dir_param_str, log_file_param, result_file_param, num_threads_param, pattern] =
+        get_arguments(argc, argv);
+
+    // convert string dictonary paremeter to fs::path type
+    fs::path dir_param;
+
+    if (find_errors(dir_param_str, dir_param, num_threads_param, pattern))
+    {
+        return 1;
+    }
+
+    // create shared pointer to Terminal_output_info object
+    std::shared_ptr<Terminal_output_info> info_ptr = std::make_shared<Terminal_output_info>();
+
+    // create thread pool
+    ThreadPool pool(num_threads_param);
+    std::vector<std::future<void>> futures;
+
+    // looking for a pattern word
+    find_files(dir_param, pattern, pool, futures, result_file_param, info_ptr, log_file_param);
+
+    // give information to info_ptr
+    info_ptr->result_path = fs::current_path().generic_string() + "\\" +
+                            result_file_param + ".txt";
+    info_ptr->log_path = fs::current_path().generic_string() + "\\" + log_file_param + ".log";
+    info_ptr->num_threads = num_threads_param;
+
+    // calculate time elapsed from beginning to the end of the program
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    info_ptr->elapsed_time =
+        std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
+
+    // print information on console
+    print_terminal_info(info_ptr);
+
+    return 0;
+}
+
+void write_to_result_file(std::vector<std::vector<std::string>> &results,
+                          std::string &result_file_name)
+{
+    // sort results vector by size of lines found in each file
+    std::sort(results.begin(), results.end(),
+              [](std::vector<std::string> &v1, std::vector<std::string> &v2)
+              { return v1.size() > v2.size(); });
+
     // add .txt to result file name
     std::string result_file_name_ = result_file_name + ".txt";
     // open file
@@ -111,12 +191,17 @@ void write_to_result_file(std::vector<std::vector<std::string>> &results, std::s
     }
 }
 
-void write_to_log_file(std::shared_ptr<std::map<std::thread::id, std::vector<std::string>>> &LogMapPtr, std::string &log_file_name)
+void write_to_log_file(std::shared_ptr<std::map<std::thread::id,
+                                                std::vector<std::string>>> &LogMapPtr,
+                       std::string &log_file_name)
 {
     // Convert the map to a vector
-    std::vector<std::pair<std::thread::id, std::vector<std::string>>> vec(LogMapPtr->begin(), LogMapPtr->end());
+    std::vector<std::pair<std::thread::id, std::vector<std::string>>>
+        vec(LogMapPtr->begin(), LogMapPtr->end());
     // Sort the vector using a lambda function
-    std::sort(vec.begin(), vec.end(), [](const std::pair<std::thread::id, std::vector<std::string>> &a, const std::pair<std::thread::id, std::vector<std::string>> &b)
+    std::sort(vec.begin(), vec.end(),
+              [](const std::pair<std::thread::id, std::vector<std::string>> &a,
+                 const std::pair<std::thread::id, std::vector<std::string>> &b)
               { return a.second.size() > b.second.size(); });
 
     // add .log to result file name
@@ -147,15 +232,78 @@ void write_to_log_file(std::shared_ptr<std::map<std::thread::id, std::vector<std
     }
 }
 
-// function which find pattern words in files
-void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, std::vector<std::future<void>> &futures, std::string &result_file_name, std::shared_ptr<Terminal_output_info> &info_ptr, std::string &log_file_name)
+void find_pattern_word(const std::filesystem::directory_entry &entry, const std::string &word,
+                       std::shared_ptr<std::vector<std::string>> results_ptr,
+                       std::shared_ptr<Terminal_output_info> &info_ptr,
+                       std::shared_ptr<std::map<
+                           std::thread::id, std::vector<std::string>>>
+                           &LogMapPtr)
+{
+    // open file to read
+    std::ifstream file(entry.path());
+    if (file.good())
+    {
+        // increase number of searched files
+        info_ptr->num_searched_files++;
+        // flag which inform us if any pattern was found in file
+        bool pattern_found = false;
+        // variables where we store lines from file and number of line
+        int line_number = 0;
+        std::string line;
+        // get id of thread for log file
+        auto id = std::this_thread::get_id();
+
+        // check if in map already exist actual threat id if exist then add new element to vector
+        // of strings, if not add new element to map
+        auto it = LogMapPtr->find(id);
+        if (it == LogMapPtr->end())
+        {
+            LogMapPtr->insert(std::make_pair(id, std::vector<std::string>{
+                                                     entry.path().filename().generic_string()}));
+        }
+        else
+        {
+            it->second.push_back(entry.path().filename().generic_string());
+        }
+
+        // read file line by line
+        while (std::getline(file, line))
+        {
+            // increase line number
+            line_number++;
+            // check if line in file has pattern word
+            if (line.find(word) != std::string::npos)
+            {
+                // create line to write into result file
+                std::string result_line = entry.path().generic_string() + ':' +
+                                          std::to_string(line_number) + ": " + line;
+                // add line to vectors of results
+                results_ptr->push_back(result_line);
+                // increase number of found patterns in all files
+                info_ptr->num_found_patterns++;
+                // increase number of found files with pattern
+                if (!pattern_found)
+                {
+                    pattern_found = true;
+                    info_ptr->num_files_with_pattern++;
+                }
+            }
+        }
+    }
+}
+
+void find_files(const fs::path &dir, const std::string &word, ThreadPool &pool,
+                std::vector<std::future<void>> &futures, std::string &result_file_name,
+                std::shared_ptr<Terminal_output_info> &info_ptr, std::string &log_file_name)
 {
     // create shared pointer and vector where data to result file will be stored
     std::vector<std::vector<std::string>> results;
-    std::shared_ptr<std::vector<std::string>> results_ptr = std::make_shared<std::vector<std::string>>();
+    std::shared_ptr<std::vector<std::string>> results_ptr =
+        std::make_shared<std::vector<std::string>>();
 
     // create shared pointer to map where data to log file will be stored
-    std::shared_ptr<std::map<std::thread::id, std::vector<std::string>>> LogMapPtr(new std::map<std::thread::id, std::vector<std::string>>);
+    std::shared_ptr<std::map<std::thread::id, std::vector<std::string>>>
+        LogMapPtr(new std::map<std::thread::id, std::vector<std::string>>);
 
     // search for files in folders
     for (const auto &entry : fs::recursive_directory_iterator(dir))
@@ -165,54 +313,8 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
         {
             //  create task for threat pool which looking for pattern word in file
             auto future = pool.submit([&entry, &word, &results_ptr, &info_ptr, &LogMapPtr]()
-                                      { 
-                                        // open file to read
-                                        std::ifstream file(entry.path());
-                                        if (file.good())
-                                        {
-                                            // increase number of searched files
-                                            info_ptr->num_searched_files++;
-
-                                            // flag which inform us if any pattern was found in file
-                                            bool pattern_found = false;
-
-                                            // variables where we store lines from file and number of line
-                                            int line_number = 0;
-                                            std::string line;
-
-                                            // get id of thread for log file
-                                            auto id = std::this_thread::get_id();
-
-                                            // check if in map already exist actual threat id if exist then add new element to vector of strings, if not add new element to map
-                                            auto it = LogMapPtr->find(id);
-                                            if(it == LogMapPtr->end()){
-                                                LogMapPtr->insert(std::make_pair(id,std::vector<std::string>{entry.path().filename().generic_string()}));
-                                            } else {
-                                                it->second.push_back(entry.path().filename().generic_string());
-                                            }
-
-                                            // read file line by line
-                                            while (std::getline(file, line))
-                                            {
-                                                // increase line number
-                                                line_number++;  
-                                                // check if line in file has pattern word
-                                                if (line.find(word) != std::string::npos)
-                                                {
-                                                    // create line to write into result file
-                                                    std::string result_line = entry.path().generic_string() + ':' + std::to_string(line_number) + ": " + line;           
-                                                    // add line to vectors of results
-                                                    results_ptr->push_back(result_line);
-                                                    // increase number of found patterns in all files
-                                                    info_ptr->num_found_patterns++;
-                                                    //increase number of found files with pattern
-                                                    if(!pattern_found){
-                                                        pattern_found = true;
-                                                        info_ptr->num_files_with_pattern++;
-                                                    }
-                                                }
-                                            }
-                                        } });
+                                      { find_pattern_word(entry, word, results_ptr,
+                                                          info_ptr, LogMapPtr); });
 
             futures.push_back(std::move(future));
 
@@ -230,15 +332,10 @@ void find_word(const fs::path &dir, const std::string &word, ThreadPool &pool, s
     // write data to log file
     write_to_log_file(LogMapPtr, log_file_name);
 
-    // sort results vector by size of lines found in each file
-    std::sort(results.begin(), results.end(), [](std::vector<std::string> &v1, std::vector<std::string> &v2)
-              { return v1.size() > v2.size(); });
-
     // write data to result file
     write_to_result_file(results, result_file_name);
 }
 
-// function which print information on console
 void print_terminal_info(std::shared_ptr<Terminal_output_info> &info_ptr)
 {
     std::cout << "Searched files: " << info_ptr->num_searched_files << std::endl;
@@ -250,15 +347,10 @@ void print_terminal_info(std::shared_ptr<Terminal_output_info> &info_ptr)
     std::cout << "Elapsed time: " << info_ptr->elapsed_time << " s" << std::endl;
 }
 
-int main(int argc, char **argv)
+bool find_errors(std::string &dir_param_str, std::filesystem::path &dir_param,
+                 int &num_threads_param, std::string &pattern)
 {
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // get arguments
-    auto [dir_param_str, log_file_param, result_file_param, num_threads_param, pattern] = get_arguments(argc, argv);
-
     // convert string dictonary paremeter to fs::path type
-    fs::path dir_param;
     if (std::filesystem::exists(dir_param_str))
     {
         dir_param = dir_param_str;
@@ -271,6 +363,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // check if there is right number of threads
+    if (num_threads_param <= 0)
+    {
+        std::cerr << "Wrong number of threads!" << std::endl;
+        std::cerr << "Number of threads must be a positive number" << std::endl;
+        return 1;
+    }
+
     // check if there is argument with pattern word which is required
     if (pattern.size() == 0)
     {
@@ -279,29 +379,6 @@ int main(int argc, char **argv)
         std::cerr << "./Specific_grep \"pattern_word\" " << std::endl;
         return 1;
     }
-
-    // create shared pointer to Terminal_output_info object
-    std::shared_ptr<Terminal_output_info> info_ptr = std::make_shared<Terminal_output_info>();
-
-    // create thread pool
-    ThreadPool pool(num_threads_param);
-    std::vector<std::future<void>> futures;
-
-    // looking for a pattern word
-    find_word(dir_param, pattern, pool, futures, result_file_param, info_ptr, log_file_param);
-
-    // give information to info_ptr
-    info_ptr->result_path = fs::current_path().generic_string() + "\\" + result_file_param + ".txt";
-    info_ptr->log_path = fs::current_path().generic_string() + "\\" + log_file_param + ".log";
-    info_ptr->num_threads = num_threads_param;
-
-    // calculate time elapsed from beginning to the end of the program
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    info_ptr->elapsed_time = std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
-
-    // print information on console
-    print_terminal_info(info_ptr);
 
     return 0;
 }
